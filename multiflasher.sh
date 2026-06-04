@@ -146,6 +146,19 @@ cleanup() {
 	wait $PRINTER_PID
 }
 
+print_disk() {
+	DISK="$1"
+	TAG="$2"
+	SIZE=$(diskutil list "$DISK" | grep "disk[0-9]*$" | sed "s/ \{1,\}/ /g" | cut -d" " -f 4,5 | sed "s/\*//g")
+	NUMBER=$(echo $SIZE | cut -d" " -f1 | sed "s/\..*//" )
+	UNIT=$(echo $SIZE | cut -d" " -f2)
+	[ $NUMBER -gt 70 -o "GB" != "$UNIT" ] && {
+		echo "Disk $DISK's size $SIZE looks suspicious. Abort"
+		exit 1
+	}
+	printf "   $DISK $SIZE $TAG\n"
+}
+
 rm -f "${STATUS_BASENAME}."*
 FILE=/Users/giulio/Downloads/pocketbeagle2-debian-12.13-bela-v6.12-arm64-2026-03-25-8gb.img
 echo Retrieving disks...
@@ -157,14 +170,13 @@ n=0
 while true; do
 	echo "The following disks have been detected for flashing:"
 	for ((n=0;n<${#DISKS[@]};n++)); do
-		echo "   ${DISKS[$n]}"
+		print_disk "${DISKS[$n]}"
 	done
 	[ -n "$USER_DISK" ] && {
 		if [ -f "$USER_DISK" ]; then
 			echo "User-provided disk $USER_DISK not found"
 		else
-			echo "   $USER_DISK (user-provided)"
-			DISKS[${#DISKS[@]}]=$USER_DISK
+			print_disk $USER_DISK "(user-provided)"
 		fi
 	}
 	if [ "$EXPERT" == 0 ]; then
