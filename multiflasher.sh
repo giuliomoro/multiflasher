@@ -177,6 +177,7 @@ while true; do
 			echo "User-provided disk $USER_DISK not found"
 		else
 			print_disk $USER_DISK "(user-provided)"
+			DISKS+=("$USER_DISK")
 		fi
 	}
 	if [ "$EXPERT" == 0 ]; then
