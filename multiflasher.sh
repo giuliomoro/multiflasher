@@ -72,6 +72,11 @@ notify() {
 	fi
 }
 
+gettime() {
+	duration=$SECONDS
+	echo "$((duration / 60))min and $((duration % 60))sec"
+}
+
 # Special log printer task
 status_printer() {
 	# First time in the loop is special insofar we don't have to
@@ -113,9 +118,10 @@ status_printer() {
 	if [ "$ERROR" == "" ]; then
 		notify "Completed" &
 	else
-		notify "Completed with errors" &
+		notify "Errors were encountered" &
 		echo __"$ERROR"__
 	fi
+	echo "Total time since flashing started: $(gettime)"
 
 	rm -f "${STATUS_BASENAME}."*
 }
@@ -128,10 +134,10 @@ do_flash() {
 	set +e
 	sudo dd if=$FILE of=$d bs=1m status=progress conv=fsync >${LOG} 2>&1
 	if [ $? -eq 0 ]; then
-		# printf "\rsuccess\e[J" > ${LOG}
-		printf "\rsuccess\e[J" > ${LOG}
+		printf "\rsuccess $(gettime)\e[J" > ${LOG}
 	else
-		printf "\rERROR\e[J" > ${LOG}
+		notify "error"
+		printf "\rERROR $(gettime)\e[J" > ${LOG}
 	fi
 }
 
@@ -213,6 +219,7 @@ wait ${TASK_PIDS[@]}
 
 echo "Starting flashing processes"
 
+SECONDS=0
 TASK_PIDS=()
 for ((n=0;n<${#DISKS[@]};n++)); do
 	d=${DISKS[$n]}
