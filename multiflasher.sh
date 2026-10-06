@@ -2,20 +2,24 @@
 
 set -e
 
+echo "multiflasher v2"
 EXPERT=0
 QUIET=0
+FORCE=0
+EXPECTED_DISKS=0
 USER_DISK=
 FILE=
 usage() {
-	echo ""
 	echo "  Usage: $0 [-e -q -h] <file> <user-provided-disk>"
 	echo ""
-	echo "  Flashes file <file> to all external disks and, if provided, to <user-provided-disk?"
+	echo "  Flashes file <file> to all external disks and, if provided, to <user-provided-disk>"
 	echo "  Flashing happens in parallel on all disks"
 	echo "  When done, or an error occurs, it launches a system notification and sound"
 	echo "  Options:"
+	echo "    -f: force: do not check file size or extension"
 	echo "    -e: expert mode, do not prompt for confirmation"
 	echo "    -q: quiet mode: do not send notifications and sounds"
+	echo "    -n <num_disks>: how many disks to expect (including autodetected and user-provided). It fails if the number of detected disks is different from this"
 	echo "    -h: print this help"
 }
 
@@ -25,11 +29,18 @@ usage() {
 }
 while [ $# -ne 0 ]; do
 	case "$1" in
+		-f)
+			FORCE=1
+		;;
 		-e)
 			EXPERT=1
 		;;
 		-q)
 			QUIET=1
+		;;
+		-n)
+			EXPECTED_DISKS=$2
+			shift
 		;;
 		-h)
 			usage
@@ -133,11 +144,17 @@ do_flash() {
 	LOG="${STATUS_BASENAME}.${TASK_ID}"
 	set +e
 	sudo dd if=$FILE of=$d bs=1m status=progress conv=fsync >${LOG} 2>&1
-	if [ $? -eq 0 ]; then
+	RES=$?
+	ERROR_TEXT=
+	if [ $SECONDS -lt $((filesize / (1024 * 1024 * 200))) ]; then
+		RES=2
+		ERROR_TEXT="Flashing was faster than 200MB/s. This indicates something went wrong."
+	fi
+	if [ $RES -eq 0 ]; then
 		printf "\rsuccess $(gettime)\e[J" > ${LOG}
 	else
 		notify "error"
-		printf "\rERROR $(gettime)\e[J" > ${LOG}
+		printf "\rERROR $ERROR_TEXT $(gettime)\e[J" > ${LOG}
 	fi
 }
 
@@ -162,13 +179,30 @@ print_disk() {
 		echo "Disk $DISK's size $SIZE looks suspicious. Abort"
 		exit 1
 	}
+	SIZE=$(diskutil list -plist "$DISK" | grep integer | sed "s/.*<integer>\([0-9]*\)<\/integer>.*/\1/" | sort -r | head -n1)
+	if [ "$filesize" -lt "$SIZE" ]; then
+		echo "size of disk $DISK is $SIZE bytes, which is smaller than the size of $FILE ($filesize). The SD card may be broken or wrong size."
+		return 1;
+	fi
 	printf "   $DISK $SIZE $TAG\n"
 }
 
+filesize=$(stat -f %z $FILE)
+if [ "$FORCE" == 0 ]; then
+	if [ "$filesize" -lt 6000000000 ]; then
+		echo "File size is smaller than 6GB. If this is expected, run with -f"
+		exit 1
+	fi
+	extension="${FILE##*.}"
+	if [ "$extension" != img ]; then
+		echo "File $FILE: extension is not img. If this is expected, run with -f"
+		exit 1
+	fi
+fi
+
 rm -f "${STATUS_BASENAME}."*
-FILE=/Users/giulio/Downloads/pocketbeagle2-debian-12.13-bela-v6.12-arm64-2026-03-25-8gb.img
 echo Retrieving disks...
-DISKS=($(diskutil list external | grep -o "/dev/disk[0-9]*" | grep -v "/dev/disk0\|/dev/disk1")) || true # safety filtering!
+DISKS=($(diskutil list external physical | grep -o "/dev/disk[0-9]*" | grep -v "/dev/disk0\|/dev/disk1")) || true # safety filtering!
 
 trap cleanup EXIT
 
@@ -186,6 +220,11 @@ while true; do
 			DISKS+=("$USER_DISK")
 		fi
 	}
+	num_disks=${#DISKS[@]}
+	if [ $EXPECTED_DISKS -gt 0 -a $num_disks -ne $EXPECTED_DISKS ]; then
+		echo "You specified -n $EXPECTED_DISKS but $num_disks were detected. Aborting"
+		exit 1
+	fi
 	if [ "$EXPERT" == 0 ]; then
 		echo " Make sure they are all good and press enter to continue. To kill the program at any time press ctrl-C"
 		read LINE
